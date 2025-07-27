@@ -27,15 +27,25 @@ import (
 	"strings"
 	"time"
 
+	celgo "github.com/google/cel-go/cel"
+	"github.com/google/cel-go/common/types"
+	"github.com/google/cel-go/common/types/ref"
+	"github.com/google/cel-go/common/types/traits"
 	asn1util "k8s.io/apimachinery/pkg/apis/asn1"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/apiserver/pkg/apis/apiserver"
+	apiservervalidation "k8s.io/apiserver/pkg/apis/apiserver/validation"
 	"k8s.io/apiserver/pkg/authentication/authenticator"
+	authenticationcel "k8s.io/apiserver/pkg/authentication/cel"
 	"k8s.io/apiserver/pkg/authentication/user"
+	"k8s.io/apiserver/pkg/cel"
+	"k8s.io/apiserver/pkg/cel/lazy"
 	"k8s.io/apiserver/pkg/features"
 	utilfeature "k8s.io/apiserver/pkg/util/feature"
 	"k8s.io/component-base/metrics"
 	"k8s.io/component-base/metrics/legacyregistry"
+	"k8s.io/klog/v2"
 )
 
 /*
@@ -122,6 +132,13 @@ type Authenticator struct {
 	user            UserConversion
 }
 
+type AuthenticatorWithCEL struct {
+	verifyOptionsFn VerifyOptionFunc
+	user            UserConversion
+	celMapper       authenticationcel.CELMapper
+	certConfig      apiserver.X509AuthConfig
+}
+
 // New returns a request.Authenticator that verifies client certificates using the provided
 // VerifyOptions, and converts valid certificate chains into user.Info using the provided UserConversion
 func New(opts x509.VerifyOptions, user UserConversion) *Authenticator {
@@ -132,6 +149,191 @@ func New(opts x509.VerifyOptions, user UserConversion) *Authenticator {
 // VerifyOptionFunc (which may be dynamic), and converts valid certificate chains into user.Info using the provided UserConversion
 func NewDynamic(verifyOptionsFn VerifyOptionFunc, user UserConversion) *Authenticator {
 	return &Authenticator{verifyOptionsFn, user}
+}
+
+func NewDynamicWithCel(certConfig apiserver.X509AuthConfig, verifyOptionsFn VerifyOptionFunc, user UserConversion) (*AuthenticatorWithCEL, error) {
+	compiler := authenticationcel.NewDefaultCompiler()
+	celMapper, fieldErr := apiservervalidation.CompileAndValidateCertAuthenticator(compiler, certConfig)
+
+	if err := fieldErr.ToAggregate(); err != nil {
+		return nil, err
+	}
+	return &AuthenticatorWithCEL{verifyOptionsFn, user, celMapper, certConfig}, nil
+}
+
+type CertRequest struct {
+	RemoteAddr string
+}
+
+func (a *AuthenticatorWithCEL) AuthenticateRequest(req *http.Request) (*authenticator.Response, bool, error) {
+	if req.TLS == nil || len(req.TLS.PeerCertificates) == 0 {
+		return nil, false, nil
+	}
+
+	var reqInfoVal *lazy.MapValue
+	if a.celMapper.RequestValidationRules != nil {
+		klog.InfoS("KEP x509", "remoteaddr", req.RemoteAddr)
+		reqInfoVal = newRequestInfoValue(req)
+
+		evalResult, err := a.celMapper.RequestValidationRules.EvalRequest(reqInfoVal)
+		if err != nil {
+			return nil, false, fmt.Errorf("x509: error evaluating request info validation rules: %w", err)
+		}
+		if err := checkValidationRulesEvaluation(evalResult, func(a authenticationcel.ExpressionAccessor) (string, error) {
+			reqValidationCondition, ok := a.(*authenticationcel.RequestValidationCondition)
+			if !ok {
+				return "", fmt.Errorf("invalid type conversion, expected UserValidationCondition")
+			}
+			return reqValidationCondition.Message, nil
+		}); err != nil {
+			return nil, false, fmt.Errorf("x509: error evaluating request info validation rule: %w", err)
+		}
+	}
+
+	optsCopy, ok := a.verifyOptionsFn()
+
+	if !ok {
+		return nil, false, nil
+	}
+	if optsCopy.Intermediates == nil && len(req.TLS.PeerCertificates) > 1 {
+		optsCopy.Intermediates = x509.NewCertPool()
+		for _, intermediate := range req.TLS.PeerCertificates[1:] {
+			optsCopy.Intermediates.AddCert(intermediate)
+		}
+	}
+
+	chains, err := req.TLS.PeerCertificates[0].Verify(optsCopy)
+	if err != nil {
+		return nil, false, fmt.Errorf(
+			"verifyiing certificate %s failed: %w",
+			certificateIdentifier(req.TLS.PeerCertificates[0]),
+			err,
+		)
+	}
+
+	var errlist []error
+	for _, chain := range chains {
+		user, ok, err := a.user.User(chain)
+		if err != nil {
+			errlist = append(errlist, err)
+			continue
+		}
+
+		if ok {
+			return user, ok, err
+		}
+	}
+	return nil, false, utilerrors.NewAggregate(errlist)
+
+}
+
+func newRequestInfoValue(request *http.Request) *lazy.MapValue {
+	lazyMap := lazy.NewMapValue(types.NewObjectType("kubernetes.Request"))
+	field := func(name string, get func() any) {
+		lazyMap.Append(name, func(_ *lazy.MapValue) ref.Val {
+			value := get()
+			return nativeToValueWithUnescape(value)
+		})
+	}
+
+	req := CertRequest{
+		RemoteAddr: strings.Split(request.RemoteAddr, ":")[0],
+	}
+	field("remoteaddr", func() any { return req.RemoteAddr })
+	return lazyMap
+}
+
+func newUserInfoValue(info user.Info) *lazy.MapValue {
+	lazyMap := lazy.NewMapValue(types.NewObjectType("kubernetes.UserInfo"))
+	field := func(name string, get func() any) {
+		lazyMap.Append(name, func(_ *lazy.MapValue) ref.Val {
+			value := get()
+			return nativeToValueWithUnescape(value)
+		})
+	}
+	field("username", func() any { return info.GetName() })
+	field("uid", func() any { return info.GetUID() })
+	field("groups", func() any { return info.GetGroups() })
+	field("extra", func() any { return info.GetExtra() })
+	return lazyMap
+}
+
+func nativeToValueWithUnescape(value any) ref.Val {
+	return unescapeWrapper(types.DefaultTypeAdapter.NativeToValue(value))
+}
+
+type unescapeMapper struct {
+	traits.Mapper
+}
+
+func (m *unescapeMapper) Find(key ref.Val) (ref.Val, bool) {
+	name, ok := unescapedName(key)
+	if ok {
+		key = name
+	}
+	value, ok := m.Mapper.Find(key)
+	return unescapeWrapper(value), ok
+}
+
+type unescapeLister struct {
+	traits.Lister
+}
+
+func (l *unescapeLister) Get(index ref.Val) ref.Val {
+	return unescapeWrapper(l.Lister.Get(index))
+}
+
+// unescapeWrapper handles __dot__ based field access for native types that are converted into CEL values.
+// This means we need to handle map lookups for our native types (the claims JSON and the user info data).
+// User info is straightforward since it just has a single map field that needs the __dot__ support.  The
+// claims JSON is more complicated because maps can appear in deeply nested fields.  This means that we need
+// to account for both nested JSON objects and nested JSON arrays in all contexts where we return a CEL value.
+// It is safe to pass any CEL value to this function, including nil (i.e. the caller can skip error checking).
+func unescapeWrapper(value ref.Val) ref.Val {
+	switch v := value.(type) {
+	case traits.Mapper:
+		return &unescapeMapper{Mapper: v} // handle nested JSON objects
+	case traits.Lister:
+		return &unescapeLister{Lister: v} // handle nested JSON arrays
+	default:
+		return value
+	}
+}
+
+func unescapedName(key ref.Val) (types.String, bool) {
+	n, ok := key.(types.String)
+	if !ok {
+		return "", false
+	}
+	ns := string(n)
+	name, ok := cel.Unescape(ns)
+	if !ok || name == ns {
+		return "", false
+	}
+	return types.String(name), true
+}
+
+// messageFunc is a function that returns a message for a validation rule.
+type messageFunc func(authenticationcel.ExpressionAccessor) (string, error)
+
+func checkValidationRulesEvaluation(results []authenticationcel.EvaluationResult, messageFn messageFunc) error {
+	for _, result := range results {
+		if result.EvalResult.Type() != celgo.BoolType {
+			return fmt.Errorf("validation expression must return a boolean")
+		}
+		if !result.EvalResult.Value().(bool) {
+			expression := result.ExpressionAccessor.GetExpression()
+
+			message, err := messageFn(result.ExpressionAccessor)
+			if err != nil {
+				return err
+			}
+
+			return fmt.Errorf("validation expression '%s' failed: %s", expression, message)
+		}
+	}
+
+	return nil
 }
 
 // AuthenticateRequest authenticates the request using presented client certificates

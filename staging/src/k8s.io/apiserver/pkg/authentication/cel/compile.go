@@ -29,6 +29,7 @@ import (
 const (
 	claimsVarName = "claims"
 	userVarName   = "user"
+	reqVarName    = "request"
 )
 
 // compiler implements the Compiler interface.
@@ -62,6 +63,10 @@ func (c compiler) CompileClaimsExpression(expressionAccessor ExpressionAccessor)
 // The user CEL variable is available to the expression.
 func (c compiler) CompileUserExpression(expressionAccessor ExpressionAccessor) (CompilationResult, error) {
 	return c.compile(expressionAccessor, userVarName)
+}
+
+func (c compiler) CompileRequestExpression(expressionAccessor ExpressionAccessor) (CompilationResult, error) {
+	return c.compile(expressionAccessor, reqVarName)
 }
 
 func (c compiler) compile(expressionAccessor ExpressionAccessor, envVarName string) (CompilationResult, error) {
@@ -137,6 +142,22 @@ func buildUserType() *apiservercel.DeclType {
 	))
 }
 
+func buildRequestType() *apiservercel.DeclType {
+	field := func(name string, declType *apiservercel.DeclType, required bool) *apiservercel.DeclField {
+		return apiservercel.NewDeclField(name, declType, required, nil, nil)
+	}
+	fields := func(fields ...*apiservercel.DeclField) map[string]*apiservercel.DeclField {
+		result := make(map[string]*apiservercel.DeclField, len(fields))
+		for _, f := range fields {
+			result[f.Name] = f
+		}
+		return result
+	}
+	return apiservercel.NewObjectType("kubernetes.Request", fields(
+		field("remoteaddr", apiservercel.StringType, false),
+	))
+}
+
 func mustBuildEnvs(baseEnv *environment.EnvSet) map[string]*environment.EnvSet {
 	buildEnvSet := func(envOpts []cel.EnvOption, declTypes []*apiservercel.DeclType) *environment.EnvSet {
 		env, err := baseEnv.Extend(environment.VersionedOptions{
@@ -152,10 +173,12 @@ func mustBuildEnvs(baseEnv *environment.EnvSet) map[string]*environment.EnvSet {
 
 	userType := buildUserType()
 	claimsType := apiservercel.NewMapType(apiservercel.StringType, apiservercel.AnyType, -1)
+	reqType := buildRequestType()
 
-	envs := make(map[string]*environment.EnvSet, 2) // build two environments, one for claims and one for user
+	envs := make(map[string]*environment.EnvSet, 3) // build two environments, one for claims and one for user
 	envs[claimsVarName] = buildEnvSet([]cel.EnvOption{cel.Variable(claimsVarName, claimsType.CelType())}, []*apiservercel.DeclType{claimsType})
 	envs[userVarName] = buildEnvSet([]cel.EnvOption{cel.Variable(userVarName, userType.CelType())}, []*apiservercel.DeclType{userType})
+	envs[reqVarName] = buildEnvSet([]cel.EnvOption{cel.Variable(reqVarName, reqType.CelType())}, []*apiservercel.DeclType{reqType})
 
 	return envs
 }

@@ -89,6 +89,20 @@ func ValidateAuthenticationConfiguration(compiler authenticationcel.Compiler, c 
 	return allErrs
 }
 
+func CompileAndValidateCertAuthenticator(compiler authenticationcel.Compiler, certConfig api.X509AuthConfig) (authenticationcel.CELMapper, field.ErrorList) {
+	return validateCertAuthenticator(compiler, certConfig, nil, utilfeature.DefaultFeatureGate.Enabled(features.StructuredAuthenticationConfiguration))
+}
+
+func validateCertAuthenticator(compiler authenticationcel.Compiler, certConfig api.X509AuthConfig, fldPath *field.Path, structuredAuthnFeatureEnabled bool) (authenticationcel.CELMapper, field.ErrorList) {
+	var allErrs field.ErrorList
+	state := &validationState{}
+
+	allErrs = append(allErrs, validateRequestValidationRules(compiler, state, certConfig.RequestValidationRules, fldPath.Child("requestValidationRules"), structuredAuthnFeatureEnabled)...)
+	allErrs = append(allErrs, validateUserValidationRules(compiler, state, certConfig.UserValidationRules, fldPath.Child("userValidationRules"), structuredAuthnFeatureEnabled)...)
+
+	return state.mapper, allErrs
+}
+
 // CompileAndValidateJWTAuthenticator validates a given JWTAuthenticator and returns a CELMapper with the compiled
 // CEL expressions for claim mappings and validation rules.
 // This is exported for use in oidc package.
@@ -577,6 +591,49 @@ func validatePrefixClaimOrExpression(compiler authenticationcel.Compiler, mappin
 	return compilationResult, allErrs
 }
 
+func validateRequestValidationRules(compiler authenticationcel.Compiler, state *validationState, rules []api.RequestValidationRule, fldPath *field.Path, structuredAuthnFeatureEnabled bool) field.ErrorList {
+	var allErrs field.ErrorList
+	var compilationResults []authenticationcel.CompilationResult
+
+	if len(rules) > 0 && !structuredAuthnFeatureEnabled {
+		allErrs = append(allErrs, field.Invalid(fldPath, "", "request validation rules are not supported when StructuredAuthenticationConfiguration feature gate is disabled"))
+	}
+
+	seenExpression := sets.NewString()
+	for i, rule := range rules {
+		fldPath := fldPath.Index(i)
+
+		if len(rule.Expression) == 0 {
+			allErrs = append(allErrs, field.Required(fldPath.Child("expression"), ""))
+		}
+
+		if seenExpression.Has(rule.Expression) {
+			allErrs = append(allErrs, field.Duplicate(fldPath.Child("expression"), rule.Expression))
+			continue
+		}
+		seenExpression.Insert(rule.Expression)
+		compilationResult, err := compileRequestCELExpression(compiler, &authenticationcel.RequestValidationCondition{
+			Expression: rule.Expression,
+			Message:    rule.Message,
+		}, fldPath.Child("expression"))
+
+		if err != nil {
+			allErrs = append(allErrs, err)
+			continue
+		}
+
+		if compilationResult != nil {
+			compilationResults = append(compilationResults, *compilationResult)
+		}
+	}
+
+	if structuredAuthnFeatureEnabled && len(compilationResults) > 0 {
+		state.mapper.RequestValidationRules = authenticationcel.NewRequestMapper(compilationResults)
+	}
+
+	return allErrs
+}
+
 func validateUserValidationRules(compiler authenticationcel.Compiler, state *validationState, rules []api.UserValidationRule, fldPath *field.Path, structuredAuthnFeatureEnabled bool) field.ErrorList {
 	var allErrs field.ErrorList
 	var compilationResults []authenticationcel.CompilationResult
@@ -632,6 +689,14 @@ func compileClaimsCELExpression(compiler authenticationcel.Compiler, expression 
 
 func compileUserCELExpression(compiler authenticationcel.Compiler, expression authenticationcel.ExpressionAccessor, fldPath *field.Path) (*authenticationcel.CompilationResult, *field.Error) {
 	compilationResult, err := compiler.CompileUserExpression(expression)
+	if err != nil {
+		return nil, convertCELErrorToValidationError(fldPath, expression.GetExpression(), err)
+	}
+	return &compilationResult, nil
+}
+
+func compileRequestCELExpression(compiler authenticationcel.Compiler, expression authenticationcel.ExpressionAccessor, fldPath *field.Path) (*authenticationcel.CompilationResult, *field.Error) {
+	compilationResult, err := compiler.CompileRequestExpression(expression)
 	if err != nil {
 		return nil, convertCELErrorToValidationError(fldPath, expression.GetExpression(), err)
 	}

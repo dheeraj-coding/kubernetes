@@ -428,6 +428,8 @@ func autoConvert_v1_AuthenticationConfiguration_To_apiserver_AuthenticationConfi
 	} else {
 		out.JWT = nil
 	}
+
+	out.X509 = (*apiserver.X509AuthConfig)(unsafe.Pointer(in.X509))
 	out.Anonymous = (*apiserver.AnonymousAuthConfig)(unsafe.Pointer(in.Anonymous))
 	return nil
 }
@@ -449,6 +451,8 @@ func autoConvert_apiserver_AuthenticationConfiguration_To_v1_AuthenticationConfi
 	} else {
 		out.JWT = nil
 	}
+
+	out.X509 = (*X509AuthConfig)(unsafe.Pointer(in.X509))
 	out.Anonymous = (*AnonymousAuthConfig)(unsafe.Pointer(in.Anonymous))
 	return nil
 }

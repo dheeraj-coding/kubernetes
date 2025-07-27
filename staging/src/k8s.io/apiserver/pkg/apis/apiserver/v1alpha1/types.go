@@ -184,10 +184,21 @@ type AuthenticationConfiguration struct {
 	//		"exp": 1234567890,
 	//		"<username claim>": "username"
 	// }
-	JWT []JWTAuthenticator `json:"jwt"`
+	JWT  []JWTAuthenticator `json:"jwt"`
+	X509 *X509AuthConfig    `json:"x509"`
 
 	// If present --anonymous-auth must not be set
 	Anonymous *AnonymousAuthConfig `json:"anonymous,omitempty"`
+}
+
+type X509AuthConfig struct {
+	RequestValidationRules []RequestValidationRule `json:"requestValidationRules,omitempty"`
+	UserValidationRules    []UserValidationRule    `json:"userValidationRule,omitempty"`
+}
+
+type RequestValidationRule struct {
+	Expression string `json:"expression,omitempty"`
+	Message    string `json:"message,omitempty"`
 }
 
 // AnonymousAuthConfig provides the configuration for the anonymous authenticator.

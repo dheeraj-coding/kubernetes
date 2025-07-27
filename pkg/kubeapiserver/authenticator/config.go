@@ -58,6 +58,7 @@ type Config struct {
 	// Anonymous holds the effective anonymous config, specified either via config file
 	// (hoisted out of AuthenticationConfig) or via flags (constructed from flag-specified values).
 	Anonymous apiserver.AnonymousAuthConfig
+	X509      apiserver.X509AuthConfig
 
 	BootstrapToken bool
 
@@ -121,7 +122,13 @@ func (config Config) New(serverLifecycle context.Context) (authenticator.Request
 	}
 
 	// X509 methods
-	if config.ClientCAContentProvider != nil {
+	if config.AuthenticationConfig != nil && config.AuthenticationConfig.X509 != nil {
+		certAuth, err := x509.NewDynamicWithCel(config.X509, config.ClientCAContentProvider.VerifyOptions, x509.CommonNameUserConversion)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+		authenticators = append(authenticators, certAuth)
+	} else if config.ClientCAContentProvider != nil {
 		certAuth := x509.NewDynamic(config.ClientCAContentProvider.VerifyOptions, x509.CommonNameUserConversion)
 		authenticators = append(authenticators, certAuth)
 	}

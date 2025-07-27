@@ -48,6 +48,7 @@ type EvaluationResult struct {
 type Compiler interface {
 	CompileClaimsExpression(expressionAccessor ExpressionAccessor) (CompilationResult, error)
 	CompileUserExpression(expressionAccessor ExpressionAccessor) (CompilationResult, error)
+	CompileRequestExpression(ExpressionAccessor ExpressionAccessor) (CompilationResult, error)
 }
 
 // ClaimsMapper provides a CEL expression mapper configured with the claims CEL variable.
@@ -65,6 +66,10 @@ type UserMapper interface {
 	// EvalUser evaluates the given user expressions and returns a list of EvaluationResult.
 	// This is used for user validation that contains a list of expressions.
 	EvalUser(ctx context.Context, userInfo traits.Mapper) ([]EvaluationResult, error)
+}
+
+type RequestMapper interface {
+	EvalRequest(req traits.Mapper) ([]EvaluationResult, error)
 }
 
 var _ ExpressionAccessor = &ClaimMappingExpression{}
@@ -143,5 +148,20 @@ func (v *UserValidationCondition) GetExpression() string {
 
 // ReturnTypes returns the CEL expression return types.
 func (v *UserValidationCondition) ReturnTypes() []*celgo.Type {
+	return []*celgo.Type{celgo.BoolType}
+}
+
+var _ ExpressionAccessor = &RequestValidationCondition{}
+
+type RequestValidationCondition struct {
+	Expression string
+	Message    string
+}
+
+func (r *RequestValidationCondition) GetExpression() string {
+	return r.Expression
+}
+
+func (r *RequestValidationCondition) ReturnTypes() []*celgo.Type {
 	return []*celgo.Type{celgo.BoolType}
 }

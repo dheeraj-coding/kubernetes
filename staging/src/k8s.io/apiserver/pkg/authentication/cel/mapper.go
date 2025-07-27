@@ -26,6 +26,7 @@ import (
 
 var _ ClaimsMapper = &mapper{}
 var _ UserMapper = &mapper{}
+var _ RequestMapper = &mapper{}
 
 // mapper implements the ClaimsMapper and UserMapper interface.
 type mapper struct {
@@ -35,12 +36,13 @@ type mapper struct {
 // CELMapper is a struct that holds the compiled expressions for
 // username, groups, uid, extra, claimValidation and userValidation
 type CELMapper struct {
-	Username             ClaimsMapper
-	Groups               ClaimsMapper
-	UID                  ClaimsMapper
-	Extra                ClaimsMapper
-	ClaimValidationRules ClaimsMapper
-	UserValidationRules  UserMapper
+	Username               ClaimsMapper
+	Groups                 ClaimsMapper
+	UID                    ClaimsMapper
+	Extra                  ClaimsMapper
+	ClaimValidationRules   ClaimsMapper
+	UserValidationRules    UserMapper
+	RequestValidationRules RequestMapper
 }
 
 // NewClaimsMapper returns a new ClaimsMapper.
@@ -52,6 +54,12 @@ func NewClaimsMapper(compilationResults []CompilationResult) ClaimsMapper {
 
 // NewUserMapper returns a new UserMapper.
 func NewUserMapper(compilationResults []CompilationResult) UserMapper {
+	return &mapper{
+		compilationResults: compilationResults,
+	}
+}
+
+func NewRequestMapper(compilationResults []CompilationResult) RequestMapper {
 	return &mapper{
 		compilationResults: compilationResults,
 	}
@@ -79,6 +87,10 @@ func (m *mapper) EvalUser(ctx context.Context, userInfo traits.Mapper) ([]Evalua
 	return m.eval(ctx, &varNameActivation{name: userVarName, value: userInfo})
 }
 
+func (m *mapper) EvalRequest(req traits.Mapper) ([]EvaluationResult, error) {
+	return m.evalNoCtx(&varNameActivation{name: reqVarName, value: req})
+}
+
 func (m *mapper) eval(ctx context.Context, input *varNameActivation) ([]EvaluationResult, error) {
 	evaluations := make([]EvaluationResult, len(m.compilationResults))
 
@@ -87,6 +99,24 @@ func (m *mapper) eval(ctx context.Context, input *varNameActivation) ([]Evaluati
 		evaluation.ExpressionAccessor = compilationResult.ExpressionAccessor
 
 		evalResult, _, err := compilationResult.Program.ContextEval(ctx, input)
+		if err != nil {
+			return nil, fmt.Errorf("expression '%s' resulted in error: %w", compilationResult.ExpressionAccessor.GetExpression(), err)
+		}
+
+		evaluation.EvalResult = evalResult
+	}
+
+	return evaluations, nil
+}
+
+func (m *mapper) evalNoCtx(input *varNameActivation) ([]EvaluationResult, error) {
+	evaluations := make([]EvaluationResult, len(m.compilationResults))
+
+	for i, compilationResult := range m.compilationResults {
+		var evaluation = &evaluations[i]
+		evaluation.ExpressionAccessor = compilationResult.ExpressionAccessor
+
+		evalResult, _, err := compilationResult.Program.Eval(input)
 		if err != nil {
 			return nil, fmt.Errorf("expression '%s' resulted in error: %w", compilationResult.ExpressionAccessor.GetExpression(), err)
 		}
