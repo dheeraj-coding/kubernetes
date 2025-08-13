@@ -170,6 +170,9 @@ func (a *AuthenticatorWithCEL) AuthenticateRequest(req *http.Request) (*authenti
 		return nil, false, nil
 	}
 
+	klog.InfoS("CEL Received issuer name: ", "name", a.certConfig.Issuer.Name)
+	klog.InfoS("Cert received issuer name: ", "name", req.TLS.PeerCertificates[0].Issuer.CommonName)
+
 	var reqInfoVal *lazy.MapValue
 	if a.celMapper.RequestValidationRules != nil {
 		klog.InfoS("KEP x509", "remoteaddr", req.RemoteAddr)

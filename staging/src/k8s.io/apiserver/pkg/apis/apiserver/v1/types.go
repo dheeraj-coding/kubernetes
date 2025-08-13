@@ -76,15 +76,20 @@ type AuthenticationConfiguration struct {
 	//		"<username claim>": "username"
 	// }
 	JWT  []JWTAuthenticator `json:"jwt"`
-	X509 *X509AuthConfig    `json:"x509,omitempty"`
+	X509 []X509AuthConfig   `json:"x509,omitempty"`
 
 	// If present --anonymous-auth must not be set
 	Anonymous *AnonymousAuthConfig `json:"anonymous,omitempty"`
 }
 
 type X509AuthConfig struct {
+	Issuer                 CertIssuer              `json:"issuer,omitempty"`
 	RequestValidationRules []RequestValidationRule `json:"requestValidationRules,omitempty"`
 	UserValidationRules    []UserValidationRule    `json:"userValidationRules,omitempty"`
+}
+
+type CertIssuer struct {
+	Name string `json:"name,omitempty"`
 }
 
 type RequestValidationRule struct {

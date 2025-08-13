@@ -165,15 +165,20 @@ type AuthenticationConfiguration struct {
 	metav1.TypeMeta
 
 	JWT  []JWTAuthenticator
-	X509 *X509AuthConfig
+	X509 []X509AuthConfig
 
 	// If present --anonymous-auth must not be set
 	Anonymous *AnonymousAuthConfig
 }
 
 type X509AuthConfig struct {
+	Issuer                 CertIssuer
 	RequestValidationRules []RequestValidationRule
 	UserValidationRules    []UserValidationRule
+}
+
+type CertIssuer struct {
+	Name string
 }
 
 type RequestValidationRule struct {

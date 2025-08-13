@@ -123,7 +123,8 @@ func (config Config) New(serverLifecycle context.Context) (authenticator.Request
 
 	// X509 methods
 	if config.AuthenticationConfig != nil && config.AuthenticationConfig.X509 != nil {
-		certAuth, err := x509.NewDynamicWithCel(config.X509, config.ClientCAContentProvider.VerifyOptions, x509.CommonNameUserConversion)
+		certAuth, err := newX509Authenticator(config.AuthenticationConfig, config.APIAudiences, config.ClientCAContentProvider.VerifyOptions)
+		// certAuth, err := x509.NewDynamicWithCel(config.X509, config.ClientCAContentProvider.VerifyOptions, x509.CommonNameUserConversion)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -297,6 +298,19 @@ func newJWTAuthenticator(serverLifecycle context.Context, config *apiserver.Auth
 		},
 		cancel: cancel,
 	}, nil
+}
+
+func newX509Authenticator(config *apiserver.AuthenticationConfiguration, apiAudiences authenticator.Audiences, verifyOptsFn x509.VerifyOptionFunc) (authenticator.Request, error) {
+
+	var certAuthns []authenticator.Request
+	for _, certAuthConfig := range config.X509 {
+		certAuth, err := x509.NewDynamicWithCel(certAuthConfig, verifyOptsFn, x509.CommonNameUserConversion)
+		if err != nil {
+			return nil, err
+		}
+		certAuthns = append(certAuthns, certAuth)
+	}
+	return authenticator.WrapAudienceAgnosticRequest(apiAudiences, union.NewFailOnError(certAuthns...)), nil
 }
 
 type authenticationConfigUpdater struct {
