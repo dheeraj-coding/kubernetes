@@ -365,6 +365,7 @@ func autoConvert_v1beta1_AuthenticationConfiguration_To_apiserver_Authentication
 		out.JWT = nil
 	}
 	out.X509 = *(*[]apiserver.X509AuthConfig)(unsafe.Pointer(&in.X509))
+	out.RequestValidationRules = *(*[]apiserver.RequestValidationRule)(unsafe.Pointer(&in.RequestValidationRules))
 	out.Anonymous = (*apiserver.AnonymousAuthConfig)(unsafe.Pointer(in.Anonymous))
 	return nil
 }
@@ -387,6 +388,7 @@ func autoConvert_apiserver_AuthenticationConfiguration_To_v1beta1_Authentication
 		out.JWT = nil
 	}
 	out.X509 = *(*[]X509AuthConfig)(unsafe.Pointer(&in.X509))
+	out.RequestValidationRules = *(*[]RequestValidationRule)(unsafe.Pointer(&in.RequestValidationRules))
 	out.Anonymous = (*AnonymousAuthConfig)(unsafe.Pointer(in.Anonymous))
 	return nil
 }

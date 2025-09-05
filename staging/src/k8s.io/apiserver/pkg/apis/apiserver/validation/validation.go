@@ -89,6 +89,13 @@ func ValidateAuthenticationConfiguration(compiler authenticationcel.Compiler, c 
 	return allErrs
 }
 
+func CompileAndValidateRequestValidationRules(compiler authenticationcel.Compiler, requestValidationRules []api.RequestValidationRule) (authenticationcel.CELMapper, field.ErrorList) {
+	state := &validationState{}
+	var allErrs field.ErrorList
+	allErrs = validateRequestValidationRules(compiler, state, requestValidationRules, nil, utilfeature.DefaultFeatureGate.Enabled(features.StructuredAuthenticationConfiguration))
+	return state.mapper, allErrs
+}
+
 func CompileAndValidateCertAuthenticator(compiler authenticationcel.Compiler, certConfig api.X509AuthConfig) (authenticationcel.CELMapper, field.ErrorList) {
 	return validateCertAuthenticator(compiler, certConfig, nil, utilfeature.DefaultFeatureGate.Enabled(features.StructuredAuthenticationConfiguration))
 }

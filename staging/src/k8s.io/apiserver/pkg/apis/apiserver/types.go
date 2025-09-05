@@ -164,8 +164,9 @@ type TracingConfiguration struct {
 type AuthenticationConfiguration struct {
 	metav1.TypeMeta
 
-	JWT  []JWTAuthenticator
-	X509 []X509AuthConfig
+	JWT                    []JWTAuthenticator
+	X509                   []X509AuthConfig
+	RequestValidationRules []RequestValidationRule
 
 	// If present --anonymous-auth must not be set
 	Anonymous *AnonymousAuthConfig

@@ -142,6 +142,43 @@ func buildUserType() *apiservercel.DeclType {
 	))
 }
 
+// Declare the nested RequestAuthorization type
+func buildRequestAuthorizationType() *apiservercel.DeclType {
+	field := func(name string, declType *apiservercel.DeclType, required bool) *apiservercel.DeclField {
+		return apiservercel.NewDeclField(name, declType, required, nil, nil)
+	}
+	fields := func(fields ...*apiservercel.DeclField) map[string]*apiservercel.DeclField {
+		result := make(map[string]*apiservercel.DeclField, len(fields))
+		for _, f := range fields {
+			result[f.Name] = f
+		}
+		return result
+	}
+	return apiservercel.NewObjectType("kubernetes.Authorization", fields(
+		field("Scheme", apiservercel.StringType, false),
+	))
+}
+
+// Declare the nested RequestHeader type
+func buildRequestHeaderType() *apiservercel.DeclType {
+	field := func(name string, declType *apiservercel.DeclType, required bool) *apiservercel.DeclField {
+		return apiservercel.NewDeclField(name, declType, required, nil, nil)
+	}
+	fields := func(fields ...*apiservercel.DeclField) map[string]*apiservercel.DeclField {
+		result := make(map[string]*apiservercel.DeclField, len(fields))
+		for _, f := range fields {
+			result[f.Name] = f
+		}
+		return result
+	}
+	return apiservercel.NewObjectType("kubernetes.Header", fields(
+		field("Host", apiservercel.StringType, false),
+		field("UserAgent", apiservercel.StringType, false),
+		field("Authorization", buildRequestAuthorizationType(), false),
+	))
+}
+
+// buildRequestType declares the top-level AuthRequest type with nested fields.
 func buildRequestType() *apiservercel.DeclType {
 	field := func(name string, declType *apiservercel.DeclType, required bool) *apiservercel.DeclField {
 		return apiservercel.NewDeclField(name, declType, required, nil, nil)
@@ -153,8 +190,12 @@ func buildRequestType() *apiservercel.DeclType {
 		}
 		return result
 	}
+
 	return apiservercel.NewObjectType("kubernetes.Request", fields(
-		field("remoteaddr", apiservercel.StringType, false),
+		field("RemoteIP", apiservercel.StringType, false),
+		field("RemotePort", apiservercel.StringType, false),
+		field("Header", buildRequestHeaderType(), false),
+		field("CertificateIssuerName", apiservercel.StringType, false),
 	))
 }
 

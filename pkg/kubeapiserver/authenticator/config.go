@@ -33,6 +33,7 @@ import (
 	"k8s.io/apiserver/pkg/authentication/request/anonymous"
 	"k8s.io/apiserver/pkg/authentication/request/bearertoken"
 	"k8s.io/apiserver/pkg/authentication/request/headerrequest"
+	"k8s.io/apiserver/pkg/authentication/request/requestvalidation"
 	"k8s.io/apiserver/pkg/authentication/request/union"
 	"k8s.io/apiserver/pkg/authentication/request/websocket"
 	"k8s.io/apiserver/pkg/authentication/request/x509"
@@ -122,14 +123,7 @@ func (config Config) New(serverLifecycle context.Context) (authenticator.Request
 	}
 
 	// X509 methods
-	if config.AuthenticationConfig != nil && config.AuthenticationConfig.X509 != nil {
-		certAuth, err := newX509Authenticator(config.AuthenticationConfig, config.APIAudiences, config.ClientCAContentProvider.VerifyOptions)
-		// certAuth, err := x509.NewDynamicWithCel(config.X509, config.ClientCAContentProvider.VerifyOptions, x509.CommonNameUserConversion)
-		if err != nil {
-			return nil, nil, nil, nil, err
-		}
-		authenticators = append(authenticators, certAuth)
-	} else if config.ClientCAContentProvider != nil {
+	if config.ClientCAContentProvider != nil {
 		certAuth := x509.NewDynamic(config.ClientCAContentProvider.VerifyOptions, x509.CommonNameUserConversion)
 		authenticators = append(authenticators, certAuth)
 	}
@@ -236,6 +230,14 @@ func (config Config) New(serverLifecycle context.Context) (authenticator.Request
 	authenticator := union.New(authenticators...)
 
 	authenticator = group.NewAuthenticatedGroupAdder(authenticator)
+
+	if config.AuthenticationConfig != nil && config.AuthenticationConfig.RequestValidationRules != nil {
+		var err error
+		authenticator, err = requestvalidation.New(config.AuthenticationConfig.RequestValidationRules, authenticator)
+		if err != nil {
+			return nil, nil, nil, nil, err
+		}
+	}
 
 	if config.Anonymous.Enabled {
 		// If the authenticator chain returns an error, return an error (don't consider a bad bearer token

@@ -133,6 +133,11 @@ func (in *AuthenticationConfiguration) DeepCopyInto(out *AuthenticationConfigura
 			(*in)[i].DeepCopyInto(&(*out)[i])
 		}
 	}
+	if in.RequestValidationRules != nil {
+		in, out := &in.RequestValidationRules, &out.RequestValidationRules
+		*out = make([]RequestValidationRule, len(*in))
+		copy(*out, *in)
+	}
 	if in.Anonymous != nil {
 		in, out := &in.Anonymous, &out.Anonymous
 		*out = new(AnonymousAuthConfig)

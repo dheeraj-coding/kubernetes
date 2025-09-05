@@ -893,7 +893,6 @@ func loadAuthenticationConfigFromData(data []byte) (*apiserver.AuthenticationCon
 	if configuration == nil { // sanity check, this should never happen but check just in case since we rely on it
 		return nil, fmt.Errorf("expected non-nil AuthenticationConfiguration")
 	}
-	klog.InfoS("KEP: X509", "expression", configuration.X509[0].RequestValidationRules[0].Expression, "message", configuration.X509[0].RequestValidationRules[0].Message)
 
 	return configuration, nil
 }
