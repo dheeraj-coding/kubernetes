@@ -99,6 +99,37 @@ func (c *DynamicServingCertificateController) GetConfigForClient(clientHello *tl
 
 	tlsConfigCopy := tlsConfig.Clone()
 
+	remotehost, _, err := net.SplitHostPort(clientHello.Conn.RemoteAddr().String())
+	if err != nil {
+		return nil, err
+	}
+	clientIP := net.ParseIP(remotehost)
+	if clientIP == nil {
+		return nil, fmt.Errorf("could not parse client IP from remote address: %s", remotehost)
+	}
+
+	tlsConfigCopy.VerifyPeerCertificate = func(rawCerts [][]byte, verifiedChains [][]*x509.Certificate) error {
+		if len(verifiedChains) == 0 || len(verifiedChains[0]) == 0 {
+			return fmt.Errorf("client did not present a verified certificate")
+		}
+
+		clientCert := verifiedChains[0][0]
+		if len(clientCert.IPAddresses) == 0 {
+			klog.Infof("************** No IPAddresses found for SAN validation")
+			return nil
+		}
+		klog.Infof("Trying to matches IPAddresses: %v", clientCert.IPAddresses)
+		for _, certIP := range clientCert.IPAddresses {
+			if certIP.Equal(clientIP) {
+				klog.Infof("Successfully matched client IP %s to certificate SAN", clientIP)
+				return nil
+			}
+		}
+
+		// return fmt.Errorf("client IP %s does not match any IP in certificate's SANs", clientIP)
+		return nil
+	}
+
 	// if the client set SNI information, just use our "normal" SNI flow
 	if len(clientHello.ServerName) > 0 {
 		return tlsConfigCopy, nil
